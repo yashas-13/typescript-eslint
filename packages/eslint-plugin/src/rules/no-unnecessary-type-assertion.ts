@@ -931,6 +931,63 @@ export default createRule<Options, MessageIds>({
       }
     }
 
+    /**
+     * Number-to-enum assertions are useful for computed enum-key indexing,
+     * even though TypeScript treats the original and asserted types as
+     * equivalent for this rule. Keep the exemption limited to assertions whose
+     * value is used only as a computed member property.
+     */
+    function isNumberToEnumAssertionUsedForIndexing(
+      node: TSESTree.TSAsExpression | TSESTree.TSTypeAssertion,
+    ): boolean {
+      const expressionType = services.getTypeAtLocation(node.expression);
+      const assertedType = services.getTypeAtLocation(node.typeAnnotation);
+      if (
+        !isTypeFlagSet(expressionType, ts.TypeFlags.NumberLike) ||
+        !isTypeFlagSet(assertedType, ts.TypeFlags.EnumLike)
+      ) {
+        return false;
+      }
+
+      if (
+        node.parent.type === AST_NODE_TYPES.MemberExpression &&
+        node.parent.computed &&
+        node.parent.property === node
+      ) {
+        return true;
+      }
+
+      if (
+        node.parent.type !== AST_NODE_TYPES.VariableDeclarator ||
+        node.parent.init !== node ||
+        node.parent.id.type !== AST_NODE_TYPES.Identifier
+      ) {
+        return false;
+      }
+
+      const identifier = node.parent.id;
+      const scope = context.sourceCode.getScope(identifier);
+      const variable = scope.variables.find(scopeVar =>
+        scopeVar.identifiers.includes(identifier),
+      );
+      const references = variable?.references.filter(reference =>
+        reference.isRead(),
+      );
+      if (!references?.length) {
+        return false;
+      }
+
+      return references.every(reference => {
+        const referenceIdentifier = reference.identifier;
+        const parent = referenceIdentifier.parent;
+        return (
+          parent.type === AST_NODE_TYPES.MemberExpression &&
+          parent.computed &&
+          parent.property === referenceIdentifier
+        );
+      });
+    }
+
     return {
       'TSAsExpression, TSTypeAssertion'(
         node: TSESTree.TSAsExpression | TSESTree.TSTypeAssertion,
@@ -969,6 +1026,10 @@ export default createRule<Options, MessageIds>({
           : !typeAnnotationIsConstAssertion;
 
         if (typeIsUnchanged && wouldSameTypeBeInferred) {
+          if (isNumberToEnumAssertionUsedForIndexing(node)) {
+            return;
+          }
+
           if (isGenericCallWithInferredTypeArguments(node.expression)) {
             context.report({
               node,

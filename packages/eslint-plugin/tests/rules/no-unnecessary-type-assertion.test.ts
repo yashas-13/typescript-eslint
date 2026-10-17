@@ -24,6 +24,33 @@ ruleTester.run('no-unnecessary-type-assertion', rule, {
     requireData: true,
   },
   valid: [
+    // https://github.com/typescript-eslint/typescript-eslint/issues/12271
+    `
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+const values: Record<Color, string> = {
+  [Color.Red]: '#f00',
+  [Color.Green]: '#0f0',
+  [Color.Blue]: '#00f',
+};
+
+function example1(valueStr: string) {
+  const color = +valueStr as Color;
+  values[color] = 'updated';
+}
+
+function example2(valueStr: string) {
+  const color: Color = +valueStr;
+  values[color] = 'updated';
+}
+
+function example3(valueStr: string) {
+  values[+valueStr as Color] = 'updated';
+}
+    `,
     // https://github.com/typescript-eslint/typescript-eslint/issues/12705
     `
 type RecursiveMethod<Options = {}> = (<NewOptions = {}>(
@@ -955,6 +982,39 @@ const x: E | undefined = o?.fn(n => n | 0, 0 as E);
   ],
 
   invalid: [
+    {
+      code: `
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+function subUpdate(color: Color) {}
+function update(valueStr: string) {
+  subUpdate(+valueStr as Color);
+}
+      `,
+      errors: [
+        {
+          column: 13,
+          endColumn: 31,
+          endLine: 9,
+          line: 9,
+          messageId: 'unnecessaryAssertion',
+        },
+      ],
+      output: `
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+function subUpdate(color: Color) {}
+function update(valueStr: string) {
+  subUpdate(+valueStr);
+}
+      `,
+    },
     {
       code: 'const foo = <3>3;',
       errors: [
